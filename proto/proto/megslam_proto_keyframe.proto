@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package megslam.proto;
+
+message Point2f {
+    float x = 1;
+    float y = 2;
+}
+
+message Point3f {
+    float x = 1;
+    float y = 2;
+    float z = 3;
+}
+
+message MatXi {
+    int32 rows = 1;
+    int32 cols = 2;
+    repeated int32 data = 3;
+}
+
+message MatX8u {
+    int32 rows = 1;
+    int32 cols = 2;
+    repeated int32 data = 3;
+}
+
+message MatXd {
+    int32 rows = 1;
+    int32 cols = 2;
+    repeated double data = 3;
+}
+
+message MatXf {
+    int32 rows = 1;
+    int32 cols = 2;
+    repeated float data = 3;
+}
+
+message KeyFrame {
+    int32 id = 1;
+    MatXd Tcw = 2;
+    repeated Point2f key_points = 3;
+    MatXf local_descriptors = 4;
+    repeated Point3f map_points = 5;
+    MatXf global_descriptor = 6;
+    MatXi encoded_local_descriptors = 7;
+    repeated int32 map_point_ids = 8;
+}
+
+message Database {
+    repeated KeyFrame keyframes = 1; // only id, tcw, global_des
+}
+
+message PointCloud {
+    repeated Point3f map_points = 1;
+    repeated MatXf descriptors = 2;
+    repeated float reprojection_errors = 3;
+}
