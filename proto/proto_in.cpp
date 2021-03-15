@@ -1,11 +1,11 @@
 #include <iostream>
 #include <fstream>
-#include "megslam_proto_keyframe.pb.h"
+#include "slam_proto_cloud.pb.h"
 using namespace std;
 
 int main(int, char **)
 {
-    megslam::proto::PointCloud cloud;
+    slam::proto::PointCloud cloud;
 
     //数据加载，反序列化
     ifstream fin("out.bin");

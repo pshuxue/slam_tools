@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package slam.proto;
+
+message Point3f {
+    float x = 1;
+    float y = 2;
+    float z = 3;
+}
+
+message MatXf {
+    int32 rows = 1;
+    int32 cols = 2;
+    repeated float data = 3;
+}
+
+message PointCloud {
+    repeated Point3f map_points = 1;
+    repeated MatXf descriptors = 2;
+    repeated float reprojection_errors = 3;
+}
