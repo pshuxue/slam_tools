@@ -28,7 +28,7 @@ Eigen::Vector3d std_tcw;
 //位姿的估计值
 cv::Mat rvec, tvec;
 
-Mat K; 
+Mat K;
 Eigen::Matrix3d K_eigen;
 
 void GetTestData();       //获取测试数据
@@ -37,7 +37,7 @@ void OptimizeRtByCeres(); //使用ceres对opencv的结果进行优化
 
 int main(int, char **)
 {
-    K= (Mat_<double>(3, 3) << 400, 0, 300, 0, 401, 302, 0, 0, 1);
+    K = (Mat_<double>(3, 3) << 400, 0, 300, 0, 401, 302, 0, 0, 1);
     K_eigen << 400, 0, 300, 0, 401, 302, 0, 0, 1;
 
     GetTestData();
@@ -45,7 +45,6 @@ int main(int, char **)
     TestOpencvPNP();
 
     OptimizeRtByCeres();
-
 }
 
 void GetTestData()
@@ -86,7 +85,10 @@ void TestOpencvPNP()
 
     //设置内参和畸变系数
     cv::Mat distCoeffs = cv::Mat::zeros(4, 1, CV_64FC1);
-    solvePnP(pts_3d, pts_2d, K, distCoeffs, rvec, tvec, false, CV_EPNP);
+    // solvePnP(pts_3d, pts_2d, K, distCoeffs, rvec, tvec, false, CV_EPNP);
+
+    cv::Mat inliners;
+    solvePnPRansac(pts_3d, pts_2d, K, distCoeffs, rvec, tvec, false, 100, 10, 0.99, inliners); //inliners是int型Mat，是索引表
 
     Eigen::Quaterniond quaternion;
     quaternion = Eigen::AngleAxisd(rvec.at<double>(0, 0), Eigen::Vector3d::UnitZ()) *
@@ -104,25 +106,25 @@ void OptimizeRtByCeres()
     cv::Rodrigues(rvec, cvR); // r为旋转向量形式，用Rodrigues公式转换为矩阵
     double camera[6] = {rvec.at<double>(0, 0), rvec.at<double>(1, 0), rvec.at<double>(2, 0), tvec.at<double>(0, 0), tvec.at<double>(1, 0), tvec.at<double>(2, 0)};
     Eigen::Matrix3d R;
-    R<<cvR.at<double>(0,0),cvR.at<double>(0,1),cvR.at<double>(0,2),
-        cvR.at<double>(1,0),cvR.at<double>(1,1),cvR.at<double>(1,2),
-        cvR.at<double>(2,0),cvR.at<double>(2,1),cvR.at<double>(2,2);
+    R << cvR.at<double>(0, 0), cvR.at<double>(0, 1), cvR.at<double>(0, 2),
+        cvR.at<double>(1, 0), cvR.at<double>(1, 1), cvR.at<double>(1, 2),
+        cvR.at<double>(2, 0), cvR.at<double>(2, 1), cvR.at<double>(2, 2);
     ceres::Problem problem;
-    Eigen::Vector3d t(camera[3],camera[4],camera[5]);
+    Eigen::Vector3d t(camera[3], camera[4], camera[5]);
 
     RtOptimizer optimizer;
-    optimizer.SetInitialVal(R,t);
+    optimizer.SetInitialVal(R, t);
     for (int i = 0; i < pts_2d.size(); ++i)
     {
-        Eigen::Vector3d xyz(pts_3d[i].x,pts_3d[i].y,pts_3d[i].z);
-        Eigen::Vector2d uv(pts_2d[i].x,pts_2d[i].y);
-        optimizer.AddResidualItem(uv,xyz,K_eigen);
+        Eigen::Vector3d xyz(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z);
+        Eigen::Vector2d uv(pts_2d[i].x, pts_2d[i].y);
+        optimizer.AddResidualItem(uv, xyz, K_eigen);
     }
     optimizer.Solve();
 
-    Eigen::Matrix4d Tcw=optimizer.GetTcw();
-    Eigen::Quaterniond qcw = Eigen::Quaterniond(Eigen::Matrix3d(Tcw.topLeftCorner(3,3))); //再转四元数
+    Eigen::Matrix4d Tcw = optimizer.GetTcw();
+    Eigen::Quaterniond qcw = Eigen::Quaterniond(Eigen::Matrix3d(Tcw.topLeftCorner(3, 3))); //再转四元数
     cout << "优化后 qcw " << qcw.w() << " " << qcw.vec().transpose() << endl;
-    Eigen::Vector3d tcw=Tcw.topRightCorner(3,1);
+    Eigen::Vector3d tcw = Tcw.topRightCorner(3, 1);
     cout << "优化后 tcw=" << tcw.transpose() << endl;
 }
