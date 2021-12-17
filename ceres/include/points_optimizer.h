@@ -49,7 +49,7 @@ namespace lvm
     ~PointsOptimizer();
 
     void SetInitialVal(Eigen::Vector3d pw);
-    void AddResidualItem(Eigen::Vector2d uv, Eigen::Matrix4d Tcw, Eigen::Matrix3d K);
+    void AddResidualItemAutoDiff(Eigen::Vector2d uv, Eigen::Matrix4d Tcw, Eigen::Matrix3d K);
     void Solve();
     Eigen::Vector3d GetPoint();
   };

@@ -17,7 +17,7 @@ namespace lvm
     point[2] = pw.z();
   }
 
-  void PointsOptimizer::AddResidualItem(Eigen::Vector2d uv, Eigen::Matrix4d Tcw, Eigen::Matrix3d K)
+  void PointsOptimizer::AddResidualItemAutoDiff(Eigen::Vector2d uv, Eigen::Matrix4d Tcw, Eigen::Matrix3d K)
   {
     ceres::CostFunction *cost_function = OptPointsCeres::Create(uv, Tcw, K);
     ceres::LossFunction *loss_function = new ceres::CauchyLoss(1.0);

@@ -19,7 +19,7 @@ int main()
   solver.SetInitialVal(Eigen::Vector3d(2, 3, 10));
   for (int idx = 0; idx < num_camere; ++idx)
   {
-    solver.AddResidualItem(uvs[idx], Tcws[idx], K);
+    solver.AddResidualItemAutoDiff(uvs[idx], Tcws[idx], K);
   }
   solver.Solve();
   cout << solver.GetPoint() << endl;

@@ -3,6 +3,8 @@
         "*.tcc": "cpp",
         "core": "cpp",
         "iostream": "cpp",
-        "complex": "cpp"
+        "complex": "cpp",
+        "new": "cpp",
+        "chrono": "cpp"
     }
 }

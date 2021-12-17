@@ -10,6 +10,7 @@
 #include <opencv2/core/eigen.hpp>
 #include <chrono>
 using namespace std;
+using namespace chrono;
 using namespace cv;
 
 const int num_points = 100;
@@ -31,9 +32,10 @@ cv::Mat rvec, tvec;
 Mat K;
 Eigen::Matrix3d K_eigen;
 
-void GetTestData();       //获取测试数据
-void TestOpencvPNP();     //测试opencv的pnp算法
-void OptimizeRtByCeres(); //使用ceres对opencv的结果进行优化
+void GetTestData();               //获取测试数据
+void TestOpencvPNP();             //测试opencv的pnp算法
+void OptimizeRtByCeresAutoDiff(); //使用ceres对opencv的结果进行优化
+void OptimizeRtByCeresNumericDiff();
 
 int main(int, char **)
 {
@@ -44,12 +46,13 @@ int main(int, char **)
 
     TestOpencvPNP();
 
-    OptimizeRtByCeres();
+    OptimizeRtByCeresAutoDiff();
+    OptimizeRtByCeresNumericDiff();
 }
 
 void GetTestData()
 {
-    Eigen::AngleAxisd vec(0.1, Eigen::Vector3d(13, 2, 10).normalized());
+    Eigen::AngleAxisd vec(1.1, Eigen::Vector3d(13, 2, 10).normalized());
     std_qwc = Eigen::Quaterniond(vec);
     std_twc = Eigen::Vector3d(-1, -1, 0);
     std_qcw = std_qwc.inverse();
@@ -66,14 +69,7 @@ void GetTestData()
         // pixs[i] += Eigen::Vector2d::Random() * 5; //add noise
         points[i] = std_qwc.toRotationMatrix() * p_c + std_twc + Eigen::Vector3d::Random() * 0.1;
     }
-    cout << "真实旋转四元数qwc:  " << std_qwc.w() << " " << std_qwc.vec().transpose() << endl;
-    cout << "真实旋转四元数qcw:  " << std_qcw.w() << " " << std_qcw.vec().transpose() << endl;
-    cout << "真实平移twc:  " << std_twc.transpose() << endl;
-    cout << "真实平移tcw:  " << std_tcw.transpose() << endl;
-}
 
-void TestOpencvPNP()
-{
     for (auto &p : points)
     {
         pts_3d.push_back(cv::Point3d(p.x(), p.y(), p.z()));
@@ -82,7 +78,16 @@ void TestOpencvPNP()
     {
         pts_2d.push_back(cv::Point2d(p.x(), p.y()));
     }
+    cout << "真实旋转四元数qwc:  " << std_qwc.w() << " " << std_qwc.vec().transpose() << endl;
+    cout << "真实旋转四元数qcw:  " << std_qcw.w() << " " << std_qcw.vec().transpose() << endl;
+    cout << "真实平移twc:  " << std_twc.transpose() << endl;
+    cout << "真实平移tcw:  " << std_tcw.transpose() << endl
+         << endl;
+}
 
+//cv中的pnp函数，求解的是欧拉角和平移
+void TestOpencvPNP()
+{
     //设置内参和畸变系数
     cv::Mat distCoeffs = cv::Mat::zeros(4, 1, CV_64FC1);
     // solvePnP(pts_3d, pts_2d, K, distCoeffs, rvec, tvec, false, CV_EPNP);
@@ -96,21 +101,16 @@ void TestOpencvPNP()
                  Eigen::AngleAxisd(rvec.at<double>(2, 0), Eigen::Vector3d::UnitX());
 
     cout << "opencv CV_EPNP计算四元数qcw:  " << quaternion.w() << " " << quaternion.vec().transpose() << endl;
-    cout << "opencv CV_EPNP计算四元数tcw:  " << tvec.at<double>(0, 0) << " " << tvec.at<double>(1, 0) << " " << tvec.at<double>(2, 0) << endl;
+    cout << "opencv CV_EPNP计算四元数tcw:  " << tvec.at<double>(0, 0) << " " << tvec.at<double>(1, 0) << " " << tvec.at<double>(2, 0) << endl
+         << endl;
 }
 
-void OptimizeRtByCeres()
+//ceres中的优化函数，优化量是李代数和平移
+void OptimizeRtByCeresAutoDiff()
 {
-    //     solvePnP(pts_3d, pts_2d, K, Mat(), r, t, false); // 调用OpenCV 的 PnP 求解，可选择EPNP，DLS等方法
-    Mat cvR;
-    cv::Rodrigues(rvec, cvR); // r为旋转向量形式，用Rodrigues公式转换为矩阵
-    double camera[6] = {rvec.at<double>(0, 0), rvec.at<double>(1, 0), rvec.at<double>(2, 0), tvec.at<double>(0, 0), tvec.at<double>(1, 0), tvec.at<double>(2, 0)};
-    Eigen::Matrix3d R;
-    R << cvR.at<double>(0, 0), cvR.at<double>(0, 1), cvR.at<double>(0, 2),
-        cvR.at<double>(1, 0), cvR.at<double>(1, 1), cvR.at<double>(1, 2),
-        cvR.at<double>(2, 0), cvR.at<double>(2, 1), cvR.at<double>(2, 2);
-    ceres::Problem problem;
-    Eigen::Vector3d t(camera[3], camera[4], camera[5]);
+    auto start = system_clock::now();
+    Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
+    Eigen::Vector3d t(0, 0, 1);
 
     RtOptimizer optimizer;
     optimizer.SetInitialVal(R, t);
@@ -118,13 +118,46 @@ void OptimizeRtByCeres()
     {
         Eigen::Vector3d xyz(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z);
         Eigen::Vector2d uv(pts_2d[i].x, pts_2d[i].y);
-        optimizer.AddResidualItem(uv, xyz, K_eigen);
+        optimizer.AddResidualItemAutoDiff(uv, xyz, K_eigen);
     }
     optimizer.Solve();
 
     Eigen::Matrix4d Tcw = optimizer.GetTcw();
     Eigen::Quaterniond qcw = Eigen::Quaterniond(Eigen::Matrix3d(Tcw.topLeftCorner(3, 3))); //再转四元数
-    cout << "优化后 qcw " << qcw.w() << " " << qcw.vec().transpose() << endl;
+    cout << "自动求导，优化后 qcw " << qcw.w() << " " << qcw.vec().transpose() << endl;
     Eigen::Vector3d tcw = Tcw.topRightCorner(3, 1);
-    cout << "优化后 tcw=" << tcw.transpose() << endl;
+    cout << "自动求导，优化后 tcw=" << tcw.transpose() << endl;
+    auto end = system_clock::now();
+    auto duration = duration_cast<microseconds>(end - start);
+    cout << "花费了"
+         << double(duration.count()) * microseconds::period::num / microseconds::period::den
+         << "秒" << endl;
+}
+
+//ceres中的优化函数，优化量是李代数和平移
+void OptimizeRtByCeresNumericDiff()
+{
+    auto start = system_clock::now();
+    Eigen::Matrix3d R = Eigen::Matrix3d::Identity();
+    Eigen::Vector3d t(0, 0, 1);
+    RtOptimizer optimizer;
+    optimizer.SetInitialVal(R, t);
+    for (int i = 0; i < pts_2d.size(); ++i)
+    {
+        Eigen::Vector3d xyz(pts_3d[i].x, pts_3d[i].y, pts_3d[i].z);
+        Eigen::Vector2d uv(pts_2d[i].x, pts_2d[i].y);
+        optimizer.AddResidualItemNumericDiff(uv, xyz, K_eigen);
+    }
+    optimizer.Solve();
+
+    Eigen::Matrix4d Tcw = optimizer.GetTcw();
+    Eigen::Quaterniond qcw = Eigen::Quaterniond(Eigen::Matrix3d(Tcw.topLeftCorner(3, 3))); //再转四元数
+    cout << "手动求导，优化后 qcw " << qcw.w() << " " << qcw.vec().transpose() << endl;
+    Eigen::Vector3d tcw = Tcw.topRightCorner(3, 1);
+    cout << "手动求导，优化后 tcw=" << tcw.transpose() << endl;
+    auto end = system_clock::now();
+    auto duration = duration_cast<microseconds>(end - start);
+    cout << "花费了"
+         << double(duration.count()) * microseconds::period::num / microseconds::period::den
+         << "秒" << endl;
 }
