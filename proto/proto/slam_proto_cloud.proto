@@ -19,3 +19,22 @@ message PointCloud {
     repeated MatXf descriptors = 2;
     repeated float reprojection_errors = 3;
 }
+
+message Intrinsic {
+    int32 rows=1;
+    int32 cols=2;
+    repeated float data = 3;
+}
+
+message Tbc {
+    int32 rows=1;
+    int32 cols=2;
+    repeated float data = 3;
+}
+
+message RigCamera{
+  int32 num_cam=1;
+  repeated Intrinsic intrinsics = 2;
+  repeated Tbc Tbcs=3;
+}
+

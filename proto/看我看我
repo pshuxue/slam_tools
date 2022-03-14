@@ -1,5 +1,5 @@
 终端执行这行代码即可生成.cc和.h：
-protoc     -I=/home/pengshuxue/temp/slam_tools/proto/proto/      --cpp_out=/home/pengshuxue/temp/slam_tools/proto/proto/                /home/pengshuxue/temp/slam_tools/proto/proto/slam_proto_cloud.proto  
+protoc     -I=/home/pengshuxue/temp/slam_tools/proto/proto/      --cpp_out=/home/pengshuxue/temp/slam_tools/proto/proto/    --python_out=./             /home/pengshuxue/temp/slam_tools/proto/proto/slam_proto_cloud.proto  
 
 编译后在build中会生成两个可执行文件
 proto_in和proto_out
