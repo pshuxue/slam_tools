@@ -11,7 +11,7 @@ void fun()
     }
 }
 
-int main(int, char **)
+void test_thread()
 {
     std::thread t1([]()
                    {
@@ -27,10 +27,20 @@ int main(int, char **)
 
     t1.detach(); //不阻塞主线程
     t2.detach();
-    for (int i = 0; i < 10; i++)
+    for (int i = 0; i < 2; i++)
     {
         std::cout << "thread main" << std::endl;
         usleep(1000000);
+    }
+}
+
+int main(int, char **)
+{
+    test_thread();
+    while (1)
+    {
+        std::cout << "mmm" << std::endl;
+        usleep(111111111);
     }
     std::cout << "Hello, world!\n";
 }
