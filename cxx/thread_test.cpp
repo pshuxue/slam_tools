@@ -1,12 +1,24 @@
 #include <iostream>
 #include <thread>
 #include <unistd.h>
+#include <mutex>
+#include <queue>
+
+std::mutex mtx;
+std::queue<int> ques;
 
 void fun()
 {
-    for (int i = 0; i < 10; i++)
+    while (1)
     {
-        std::cout << "thread 2" << std::endl;
+        {
+            std::unique_lock<std::mutex> lck(mtx);
+            if (!ques.empty())
+            {
+                std::cout << "thread 2 " << ques.front() << std::endl;
+                ques.pop();
+            }
+        }
         usleep(1000000);
     }
 }
@@ -16,7 +28,11 @@ void test_thread()
     std::thread t1([]()
                    {
         for(int i=0;i<10;i++){
-        std::cout << "thread 1" <<std::endl;
+        {
+            std::unique_lock<std::mutex> lck (mtx);
+            ques.push(i);
+            std::cout << "thread 1 "<<i <<std::endl;
+        }
         usleep(1000000);
     } });
 
@@ -27,11 +43,6 @@ void test_thread()
 
     t1.detach(); //不阻塞主线程
     t2.detach();
-    for (int i = 0; i < 2; i++)
-    {
-        std::cout << "thread main" << std::endl;
-        usleep(1000000);
-    }
 }
 
 int main(int, char **)
