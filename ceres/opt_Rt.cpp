@@ -85,7 +85,7 @@ void GetTestData()
          << endl;
 }
 
-//cv中的pnp函数，求解的是欧拉角和平移
+// cv中的pnp函数，求解的是欧拉角和平移
 void TestOpencvPNP()
 {
     //设置内参和畸变系数
@@ -93,19 +93,24 @@ void TestOpencvPNP()
     // solvePnP(pts_3d, pts_2d, K, distCoeffs, rvec, tvec, false, CV_EPNP);
 
     cv::Mat inliners;
-    solvePnPRansac(pts_3d, pts_2d, K, distCoeffs, rvec, tvec, false, 100, 10, 0.99, inliners); //inliners是int型Mat，是索引表
+    solvePnPRansac(pts_3d, pts_2d, K, distCoeffs, rvec, tvec, false, 100, 10, 0.99, inliners); // inliners是int型Mat，是索引表
 
-    Eigen::Quaterniond quaternion;
-    quaternion = Eigen::AngleAxisd(rvec.at<double>(0, 0), Eigen::Vector3d::UnitZ()) *
-                 Eigen::AngleAxisd(rvec.at<double>(1, 0), Eigen::Vector3d::UnitY()) *
-                 Eigen::AngleAxisd(rvec.at<double>(2, 0), Eigen::Vector3d::UnitX());
+    cv::Mat R;
+    cv::Rodrigues(rvec, R); // 旋转角和旋转矩阵互转的函数
+
+    Eigen::Matrix3d Rcw;
+    Rcw << R.at<double>(0, 0), R.at<double>(0, 1), R.at<double>(0, 2),
+        R.at<double>(1, 0), R.at<double>(1, 1), R.at<double>(1, 2),
+        R.at<double>(2, 0), R.at<double>(2, 1), R.at<double>(2, 2);
+
+    Eigen::Quaterniond quaternion(Rcw);
 
     cout << "opencv CV_EPNP计算四元数qcw:  " << quaternion.w() << " " << quaternion.vec().transpose() << endl;
     cout << "opencv CV_EPNP计算四元数tcw:  " << tvec.at<double>(0, 0) << " " << tvec.at<double>(1, 0) << " " << tvec.at<double>(2, 0) << endl
          << endl;
 }
 
-//ceres中的优化函数，优化量是李代数和平移
+// ceres中的优化函数，优化量是李代数和平移
 void OptimizeRtByCeresAutoDiff()
 {
     auto start = system_clock::now();
@@ -134,7 +139,7 @@ void OptimizeRtByCeresAutoDiff()
          << "秒" << endl;
 }
 
-//ceres中的优化函数，优化量是李代数和平移
+// ceres中的优化函数，优化量是李代数和平移
 void OptimizeRtByCeresNumericDiff()
 {
     auto start = system_clock::now();
