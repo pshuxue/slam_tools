@@ -16,3 +16,6 @@ target_link_libraries(opt_Rt ${OpenCV_LIBRARIES} ${CERES_LIBRARIES})
 
 add_executable(opt_points opt_points.cpp   src/points_optimizer.cpp)
 target_link_libraries(opt_points ${OpenCV_LIBRARIES} ${CERES_LIBRARIES})
+
+add_executable(inverse_depth inverse_depth.cpp  src/so3.cpp)
+target_link_libraries(inverse_depth ${CERES_LIBRARIES})
