@@ -4,6 +4,8 @@
 #include "so3.h"
 #include <fstream>
 #include <sstream>
+#include "ceres/gradient_checker.h"
+
 using namespace std;
 
 class LaserOdometryFactor : public ceres::SizedCostFunction<6, 7, 7>
@@ -315,6 +317,26 @@ void fun(vector<IMU> &imus, int i, int j)
             laser_odom_factor,
             nullptr,
             imus[idx].arr, imus[idx + 1].arr);
+
+        std::vector<const ceres::LocalParameterization *> local_parameterizations;
+        local_parameterizations.push_back(parameterization);
+        local_parameterizations.push_back(parameterization);
+
+        ceres::NumericDiffOptions numeric_diff_options;
+
+        std::vector<double *> parameter_blocks;
+        parameter_blocks.push_back(imus[idx].arr);
+        parameter_blocks.push_back(imus[idx + 1].arr);
+
+        ceres::GradientChecker::ProbeResults results;
+        ceres::GradientChecker checker(laser_odom_factor, &local_parameterizations, numeric_diff_options);
+        checker.Probe(parameter_blocks.data(), 1e-5, &results);
+
+        if (!checker.Probe(parameter_blocks.data(), 1e-5, &results))
+        {
+            std::cout << "An error has occurred:\n"
+                      << results.error_log << std::endl;
+        }
     }
     ceres::Solver::Options ops;
     ceres::Solver::Summary summary;

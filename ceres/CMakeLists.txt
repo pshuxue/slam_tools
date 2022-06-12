@@ -19,3 +19,8 @@ target_link_libraries(opt_points ${OpenCV_LIBRARIES} ${CERES_LIBRARIES})
 
 add_executable(inverse_depth inverse_depth.cpp  src/so3.cpp)
 target_link_libraries(inverse_depth ${CERES_LIBRARIES})
+add_executable(test test.cpp  src/so3.cpp)
+target_link_libraries(test ${CERES_LIBRARIES})
+
+add_executable(inverse_depth_muti_cam inverse_depth_muti_cam.cpp   src/so3.cpp)
+target_link_libraries(inverse_depth_muti_cam ${CERES_LIBRARIES})

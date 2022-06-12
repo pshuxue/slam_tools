@@ -1,52 +1,91 @@
-//逆深度的优化，同时优化两个图像的位姿 立体投影的位置以及深度
+//逆深度的优化，在inverse_depth.cpp 上改的，这里主要优化的是imu，主要解决多目只优化一个位姿的问题
+
 #include <iostream>
 #include <Eigen/Core>
 #include <eigen3/Eigen/Core>
 #include <eigen3/Eigen/Geometry>
 #include <ceres/ceres.h>
 #include <ceres/rotation.h>
-#include "so3.h"
 #include <ceres/gradient_checker.h>
+#include <ceres/gradient_problem_solver.h>
+#include "so3.h"
 
 using namespace std;
 
-class InverseDistanceFactor : public ceres::SizedCostFunction<3, 7, 7, 2, 1>
+Eigen::Matrix4d TransFromArr(double *arr)
+{
+  Eigen::Vector3d t(arr[0], arr[1], arr[2]);
+  Eigen::Quaterniond q(arr[6], arr[3], arr[4], arr[5]);
+  Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
+  T.topLeftCorner(3, 3) = q.toRotationMatrix();
+  T.topRightCorner(3, 1) = t;
+  return T;
+}
+
+void PrintT(Eigen::Matrix4d &T)
+{
+  Eigen::Matrix3d R = T.topLeftCorner(3, 3);
+  Eigen::Quaterniond q(R);
+  std::cout << T(0, 3) << " " << T(1, 3) << " " << T(2, 3) << " " << q.x() << " " << q.y() << " " << q.z() << " " << q.w() << std::endl;
+}
+
+void TransFromArr(double *arr, Eigen::Quaterniond &q, Eigen::Vector3d &t)
+{
+  t = Eigen::Vector3d(arr[0], arr[1], arr[2]);
+  q = Eigen::Quaterniond(arr[6], arr[3], arr[4], arr[5]);
+}
+
+class RigInverseDistanceFactor : public ceres::SizedCostFunction<3, 7, 7, 2, 1> // imupose imupose uv p
 {
 public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  InverseDistanceFactor(const Eigen::Vector3d &meas_direction); //  Tij
+  RigInverseDistanceFactor(const Eigen::Vector3d &meas_direction, const Eigen::Matrix4d &Tia, const Eigen::Matrix4d &Tic); //  Tij
   void SetinformationMatrix(const Eigen::Matrix<double, 3, 3> &info);
   virtual bool Evaluate(double const *const *parameters, double *residuals,
                         double **jacobians) const;
 
   Eigen::Vector3d meas_direction_;
+  Eigen::Matrix3d Ria; //与3d点绑定的图像对应imu的外参
+  Eigen::Vector3d tia;
+  Eigen::Matrix3d Ric; //没有与3d点绑定的图像对应imu的外参
+  Eigen::Vector3d tic;
+
   Eigen::Matrix<double, 3, 3> sqrt_info_;
 };
 
-InverseDistanceFactor::InverseDistanceFactor(const Eigen::Vector3d &meas_direction)
+RigInverseDistanceFactor::RigInverseDistanceFactor(const Eigen::Vector3d &meas_direction, const Eigen::Matrix4d &Tia, const Eigen::Matrix4d &Tic)
 {
+  Ria = Tia.topLeftCorner(3, 3);
+  tia = Tia.topRightCorner(3, 1);
+  Ric = Tic.topLeftCorner(3, 3);
+  tic = Tic.topRightCorner(3, 1);
   meas_direction_ = meas_direction;
+  sqrt_info_ = Eigen::Matrix<double, 3, 3>::Identity();
 }
 
-void InverseDistanceFactor::SetinformationMatrix(const Eigen::Matrix<double, 3, 3> &info)
+void RigInverseDistanceFactor::SetinformationMatrix(const Eigen::Matrix<double, 3, 3> &info)
 {
   sqrt_info_ = info;
 }
 
-bool InverseDistanceFactor::Evaluate(double const *const *parameters, double *residuals,
-                                     double **jacobians) const
+bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double *residuals,
+                                        double **jacobians) const
 {
-  const Eigen::Vector3d twa(parameters[0][0], parameters[0][1], parameters[0][2]);
-  const Eigen::Quaterniond qwa(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
-  const Eigen::Matrix3d Rwa = qwa.toRotationMatrix();
-  const Eigen::Matrix3d Raw = Rwa.transpose();
-  // std::cout << "Rwa " << Rwa << std::endl;
+  // x表示Ic  y表示Ia
+  const Eigen::Vector3d twy(parameters[0][0], parameters[0][1], parameters[0][2]);
+  const Eigen::Quaterniond qwy(parameters[0][6], parameters[0][3], parameters[0][4], parameters[0][5]);
+  const Eigen::Matrix3d Rwy = qwy.toRotationMatrix();
+  const Eigen::Matrix3d Rwa = Rwy * Ria;
+  const Eigen::Vector3d twa = twy + Rwy * tia;
 
-  const Eigen::Vector3d twc(parameters[1][0], parameters[1][1], parameters[1][2]);
-  const Eigen::Quaterniond qwc(parameters[1][6], parameters[1][3], parameters[1][4], parameters[1][5]);
-  const Eigen::Matrix3d Rwc = qwc.toRotationMatrix();
+  const Eigen::Vector3d twx(parameters[1][0], parameters[1][1], parameters[1][2]);
+  const Eigen::Quaterniond qwx(parameters[1][6], parameters[1][3], parameters[1][4], parameters[1][5]);
+  const Eigen::Matrix3d Rwx = qwx.toRotationMatrix();
+  const Eigen::Matrix3d Rxw = Rwx.transpose();
+  const Eigen::Matrix3d Rwc = Rwx * Ric;
   const Eigen::Matrix3d Rcw = Rwc.transpose();
+  const Eigen::Vector3d twc = twx + Rwx * tic;
   // std::cout << "Rwc " << Rwc << std::endl;
 
   const double u = parameters[2][0];
@@ -57,10 +96,11 @@ bool InverseDistanceFactor::Evaluate(double const *const *parameters, double *re
 
   const double n = 2 / (u * u + v * v + 1);
   const Eigen::Vector3d pa(n * u, n * v, n - 1);
-  // std::cout << "pa " << pa.transpose() << std::endl;
+  // std::cout << "sspa " << pa.transpose() << std::endl;
   const Eigen::Vector3d pc = Rcw * Rwa * pa + inverse * Rcw * (twa - twc);
   const Eigen::Vector3d pc_norm = pc.normalized();
-  // std::cout << "pc " << pc.transpose() << std::endl;
+  // std::cout<<Rwx<<std::endl;
+  // std::cout << "twc sss  " << twa.transpose() << std::endl;
   // std::cout << "pc_norm " << pc_norm.transpose() << " " << inverse << std::endl;
 
   Eigen::Map<Eigen::Matrix<double, 3, 1>> residual(residuals);
@@ -75,32 +115,28 @@ bool InverseDistanceFactor::Evaluate(double const *const *parameters, double *re
   {
     if (jacobians[0])
     {
-      Eigen::Map<Eigen::Matrix<double, 3, 7, Eigen::RowMajor>> dr_dTwa(jacobians[0]);
-      Eigen::Matrix<double, 3, 7> dpc_dTwa;
-      dpc_dTwa.setZero();
+      Eigen::Map<Eigen::Matrix<double, 3, 7, Eigen::RowMajor>> dr_dTwy(jacobians[0]);
+      Eigen::Matrix<double, 3, 7> dpc_dTwy;
+      dpc_dTwy.setZero();
 
-      dpc_dTwa.block<3, 3>(0, 0) = inverse * Rcw; // dpc_dtwa
-
-      // Eigen::AngleAxisd vec(Rwa);
-      // Eigen::Vector3d vv = vec.angle() * vec.axis();
-      // Eigen::Matrix3d Jl = Sophus::SO3::JacobianL(vv);
-      // Eigen::Matrix3d Jr = Sophus::SO3::JacobianR(vv);
-
-      dpc_dTwa.block<3, 3>(0, 3) = -Rcw * Sophus::SO3::hat(Rwa * pa); // dpc_dRwa
-      dr_dTwa = dr_dpc * dpc_dTwa;
-      dr_dTwa = sqrt_info_ * dr_dTwa;
+      dpc_dTwy.block<3, 3>(0, 0) = inverse * Rcw;                                                                   // dpc_dtwa
+      dpc_dTwy.block<3, 3>(0, 3) = -Rcw * Sophus::SO3::hat(Rwa * pa) - Rcw * Sophus::SO3::hat(inverse * Rwy * tia); // dpc_dRwa
+      // std::cout << "err " << Rcw * Sophus::SO3::hat(inverse * Rwy * tia) << std::endl;
+      // std::cout<<Rwa << std::endl;
+      dr_dTwy = dr_dpc * dpc_dTwy;
+      dr_dTwy = sqrt_info_ * dr_dTwy;
     }
 
     if (jacobians[1])
     {
-      Eigen::Map<Eigen::Matrix<double, 3, 7, Eigen::RowMajor>> dr_dTwc(jacobians[1]);
-      Eigen::Matrix<double, 3, 7> dpc_dTwc;
-      dpc_dTwc.setZero();
+      Eigen::Map<Eigen::Matrix<double, 3, 7, Eigen::RowMajor>> dr_dTwx(jacobians[1]);
+      Eigen::Matrix<double, 3, 7> dpc_dTwx;
+      dpc_dTwx.setZero();
 
-      dpc_dTwc.block<3, 3>(0, 0) = -inverse * Rcw;                                           // dpc_dtwc
-      dpc_dTwc.block<3, 3>(0, 3) = Rcw * Sophus::SO3::hat(Rwa * pa + inverse * (twa - twc)); // dpc_dRwc
-      dr_dTwc = dr_dpc * dpc_dTwc;
-      dr_dTwc = sqrt_info_ * dr_dTwc;
+      dpc_dTwx.block<3, 3>(0, 0) = -inverse * Rcw;                                                       // dpc_dtwc
+      dpc_dTwx.block<3, 3>(0, 3) = Rcw * Sophus::SO3::hat(Rwa * pa + inverse * (twy + Rwy * tia - twx)); // dpc_dRwc
+      dr_dTwx = dr_dpc * dpc_dTwx;
+      dr_dTwx = sqrt_info_ * dr_dTwx;
     }
 
     if (jacobians[2])
@@ -114,7 +150,7 @@ bool InverseDistanceFactor::Evaluate(double const *const *parameters, double *re
       const double NN = N * N;
       dpa_duv(0, 0) = (2 * v2 - 2 * u2 + 2) / NN;
       dpa_duv(0, 1) = -4 * u * v / NN;
-      dpa_duv(1, 0) = -4 * u * v / NN;
+      dpa_duv(1, 0) = dpa_duv(0, 1);
       dpa_duv(1, 1) = (2 * u2 - 2 * v2 + 2) / NN;
       dpa_duv(2, 0) = -4 * u / NN;
       dpa_duv(2, 1) = -4 * v / NN;
@@ -201,10 +237,19 @@ void Test1()
 
   double Twa_arr[7] = {0.7, 0.2, 0.1, 0, 0, 0.8, 0.6}; // txtytzqxqyqzqw
   Eigen::Matrix3d Rwa = Eigen::Matrix3d::Identity();
-  Eigen::Vector3d twa(0.7, 0, 0);
+  Eigen::Vector3d twa(0, 0, 0);
 
-  constexpr int number_point = 100;
-  constexpr int number_image = 100;
+  Eigen::Matrix4d Tia = Eigen::Matrix4d::Identity();
+  Eigen::Matrix4d Tic = Eigen::Matrix4d::Identity();
+  Eigen::AngleAxisd vec(0.4, Eigen::Vector3d::Random().normalized());
+  Tia.topLeftCorner(3, 3) = vec.toRotationMatrix();
+  Tia.topRightCorner(3, 1) = Eigen::Vector3d::Random();
+  Eigen::Matrix4d Tai = Tia.inverse();
+  std::cout << "Tia" << Tia << std::endl;
+  PrintT(Tai);
+
+  constexpr int number_point = 1;
+  constexpr int number_image = 1;
 
   double uv_arr[number_point][2];
   double inverse_dis_arr[number_point][1];
@@ -272,7 +317,7 @@ void Test1()
       Eigen::Vector3d pc = Rwc.transpose() * (map_points[i] - twc);
 
       Eigen::Vector3d meas = pc.normalized();
-      InverseDistanceFactor *inverse_distance_factor = new InverseDistanceFactor(meas);
+      RigInverseDistanceFactor *inverse_distance_factor = new RigInverseDistanceFactor(meas, Tia, Tic);
       Eigen::Matrix<double, 3, 3> sqrt_info = Eigen::Matrix<double, 3, 3>::Identity();
       inverse_distance_factor->SetinformationMatrix(sqrt_info);
 
@@ -281,29 +326,29 @@ void Test1()
           nullptr,
           Twa_arr, Twc_arr[j], uv_arr[i], inverse_dis_arr[i]);
 
-      // std::vector<const ceres::LocalParameterization *> local_parameterizations;
-      // local_parameterizations.push_back(parameterization);
-      // local_parameterizations.push_back(parameterization);
-      // local_parameterizations.push_back(nullptr);
-      // local_parameterizations.push_back(nullptr);
+      std::vector<const ceres::LocalParameterization *> local_parameterizations;
+      local_parameterizations.push_back(parameterization);
+      local_parameterizations.push_back(parameterization);
+      local_parameterizations.push_back(nullptr);
+      local_parameterizations.push_back(nullptr);
 
-      // ceres::NumericDiffOptions numeric_diff_options;
+      ceres::NumericDiffOptions numeric_diff_options;
 
-      // std::vector<double *> parameter_blocks;
-      // parameter_blocks.push_back(Twa_arr);
-      // parameter_blocks.push_back(Twc_arr[j]);
-      // parameter_blocks.push_back(uv_arr[i]);
-      // parameter_blocks.push_back(inverse_dis_arr[i]);
+      std::vector<double *> parameter_blocks;
+      parameter_blocks.push_back(Twa_arr);
+      parameter_blocks.push_back(Twc_arr[j]);
+      parameter_blocks.push_back(uv_arr[i]);
+      parameter_blocks.push_back(inverse_dis_arr[i]);
 
-      // ceres::GradientChecker::ProbeResults results;
-      // ceres::GradientChecker checker(inverse_distance_factor, &local_parameterizations, numeric_diff_options);
-      // checker.Probe(parameter_blocks.data(), 1e-5, &results);
+      ceres::GradientChecker::ProbeResults results;
+      ceres::GradientChecker checker(inverse_distance_factor, &local_parameterizations, numeric_diff_options);
+      checker.Probe(parameter_blocks.data(), 1e-5, &results);
 
-      // if (!checker.Probe(parameter_blocks.data(), 1e-5, &results))
-      // {
-      //   std::cout << "An error has occurred:\n"
-      //             << results.error_log << std::endl;
-      // }
+      if (!checker.Probe(parameter_blocks.data(), 1e-5, &results))
+      {
+        std::cout << "An error has occurred:\n"
+                  << results.error_log << std::endl;
+      }
     }
   }
 
@@ -324,15 +369,23 @@ void Test2()
 {
   std::cout << "optimizer Twc" << std::endl;
 
-  double Twc_arr[7] = {0.1, 0.2, -0.4, 0.8, 0, 0, 0.6}; // txtytzqxqyqzqw
+  Eigen::Matrix4d Tia = Eigen::Matrix4d::Identity();
+  Eigen::Matrix4d Tic = Eigen::Matrix4d::Identity();
+  Eigen::AngleAxisd vec(0.3, Eigen::Vector3d::Random().normalized());
+  Tic.topLeftCorner(3, 3) = vec.toRotationMatrix();
+  Tic.topRightCorner(3, 1) = Eigen::Vector3d::Random();
+  Eigen::Matrix4d Tci = Tic.inverse();
+  std::cout << "Tic" << Tic << std::endl;
+  PrintT(Tci);
+  double TwIc_arr[7] = {0.1, 0.2, -0.4, 0, 0.8, 0, 0.6}; // txtytzqxqyqzqw
   Eigen::Matrix3d Rwc = Eigen::Matrix3d::Identity();
-  Eigen::Vector3d twc(0.1, 2, -0.1);
+  Eigen::Vector3d twc(0, 0, 0);
 
   constexpr int number_point_image = 200;
 
   double uv_arr[number_point_image][2];
   double inverse_dis_arr[number_point_image][1];
-  double Twa_arr[number_point_image][7];
+  double TwIa_arr[number_point_image][7];
   std::vector<Eigen::Vector3d> map_points;
   std::vector<Eigen::Matrix3d> Rwas;
   std::vector<Eigen::Vector3d> twas;
@@ -340,7 +393,7 @@ void Test2()
   ceres::Problem problem;
   ceres::LocalParameterization *parameterization =
       new PoseLocalParameterization;
-  problem.AddParameterBlock(Twc_arr, 7, parameterization);
+  problem.AddParameterBlock(TwIc_arr, 7, parameterization);
 
   for (int i = 0; i < number_point_image; ++i)
   {
@@ -363,31 +416,31 @@ void Test2()
     uv_arr[i][1] = pa.y() / (pa.z() + 1);
 
     Eigen::Quaterniond qwa(Rwa);
-    Twa_arr[i][0] = twa.x();
-    Twa_arr[i][1] = twa.y();
-    Twa_arr[i][2] = twa.z();
-    Twa_arr[i][3] = qwa.x();
-    Twa_arr[i][4] = qwa.y();
-    Twa_arr[i][5] = qwa.z();
-    Twa_arr[i][6] = qwa.w();
+    TwIa_arr[i][0] = twa.x();
+    TwIa_arr[i][1] = twa.y();
+    TwIa_arr[i][2] = twa.z();
+    TwIa_arr[i][3] = qwa.x();
+    TwIa_arr[i][4] = qwa.y();
+    TwIa_arr[i][5] = qwa.z();
+    TwIa_arr[i][6] = qwa.w();
 
     problem.AddParameterBlock(uv_arr[i], 2);
     problem.SetParameterBlockConstant(uv_arr[i]);
     problem.AddParameterBlock(inverse_dis_arr[i], 1);
     problem.SetParameterBlockConstant(inverse_dis_arr[i]);
-    problem.AddParameterBlock(Twa_arr[i], 7, parameterization);
-    problem.SetParameterBlockConstant(Twa_arr[i]);
+    problem.AddParameterBlock(TwIa_arr[i], 7, parameterization);
+    problem.SetParameterBlockConstant(TwIa_arr[i]);
 
     Eigen::Vector3d pc = Rwc.transpose() * (map_point - twc);
 
-    InverseDistanceFactor *inverse_distance_factor = new InverseDistanceFactor(pc.normalized());
+    RigInverseDistanceFactor *inverse_distance_factor = new RigInverseDistanceFactor(pc.normalized(), Eigen::Matrix4d::Identity(), Tic);
     Eigen::Matrix<double, 3, 3> sqrt_info = Eigen::Matrix<double, 3, 3>::Identity();
     inverse_distance_factor->SetinformationMatrix(sqrt_info);
 
     problem.AddResidualBlock(
         inverse_distance_factor,
         nullptr,
-        Twa_arr[i], Twc_arr, uv_arr[i], inverse_dis_arr[i]);
+        TwIa_arr[i], TwIc_arr, uv_arr[i], inverse_dis_arr[i]);
     // std::cout << i << std::endl;
   }
 
@@ -399,7 +452,7 @@ void Test2()
   std::cout << "Twc ";
   for (int i = 0; i < 7; ++i)
   {
-    std::cout << Twc_arr[i] << " ";
+    std::cout << TwIc_arr[i] << " ";
   }
   std::cout << endl;
 }
@@ -408,7 +461,7 @@ void Test3()
 {
   std::cout << "optimizer uvp" << std::endl;
 
-  double Twa_arr[7] = {0.7, 0, 0, 0, 0, 0, 1}; // txtytzqxqyqzqw
+  double TwIa_arr[7] = {0.7, 0, 0, 0, 0, 0, 1}; // txtytzqxqyqzqw
   Eigen::Matrix3d Rwa = Eigen::Matrix3d::Identity();
   Eigen::Vector3d twa(0.7, 0, 0);
 
@@ -417,7 +470,7 @@ void Test3()
   double uv_arr[2] = {0.5, -0.4};
   double inverse_dis_arr[1] = {0.8};
 
-  double Twc_arr[number_image][7];
+  double TwIc_arr[number_image][7];
 
   Eigen::Vector3d map_point = Eigen::Vector3d::Random() * 5;
   map_point.z() += 8;
@@ -438,8 +491,8 @@ void Test3()
   ceres::Problem problem;
   ceres::LocalParameterization *parameterization =
       new PoseLocalParameterization;
-  problem.AddParameterBlock(Twa_arr, 7, parameterization);
-  problem.SetParameterBlockConstant(Twa_arr);
+  problem.AddParameterBlock(TwIa_arr, 7, parameterization);
+  problem.SetParameterBlockConstant(TwIa_arr);
   problem.AddParameterBlock(uv_arr, 2);
   problem.AddParameterBlock(inverse_dis_arr, 1);
 
@@ -449,26 +502,26 @@ void Test3()
     Eigen::Matrix3d Rwc = vec.toRotationMatrix();
     Eigen::Vector3d twc = Eigen::Vector3d::Random() * 3;
     Eigen::Quaterniond qwc(Rwc);
-    Twc_arr[i][0] = twc.x();
-    Twc_arr[i][1] = twc.y();
-    Twc_arr[i][2] = twc.z();
-    Twc_arr[i][3] = qwc.x();
-    Twc_arr[i][4] = qwc.y();
-    Twc_arr[i][5] = qwc.z();
-    Twc_arr[i][6] = qwc.w();
-    problem.AddParameterBlock(Twc_arr[i], 7, parameterization);
-    problem.SetParameterBlockConstant(Twc_arr[i]);
+    TwIc_arr[i][0] = twc.x();
+    TwIc_arr[i][1] = twc.y();
+    TwIc_arr[i][2] = twc.z();
+    TwIc_arr[i][3] = qwc.x();
+    TwIc_arr[i][4] = qwc.y();
+    TwIc_arr[i][5] = qwc.z();
+    TwIc_arr[i][6] = qwc.w();
+    problem.AddParameterBlock(TwIc_arr[i], 7, parameterization);
+    problem.SetParameterBlockConstant(TwIc_arr[i]);
 
     Eigen::Vector3d pc = Rwc.transpose() * (map_point - twc);
     Eigen::Vector3d meas = pc.normalized();
-    InverseDistanceFactor *inverse_distance_factor = new InverseDistanceFactor(meas);
+    RigInverseDistanceFactor *inverse_distance_factor = new RigInverseDistanceFactor(meas, Eigen::Matrix4d::Identity(), Eigen::Matrix4d::Identity());
     Eigen::Matrix<double, 3, 3> sqrt_info = Eigen::Matrix<double, 3, 3>::Identity();
     inverse_distance_factor->SetinformationMatrix(sqrt_info);
 
     problem.AddResidualBlock(
         inverse_distance_factor,
         nullptr,
-        Twa_arr, Twc_arr[i], uv_arr, inverse_dis_arr);
+        TwIa_arr, TwIc_arr[i], uv_arr, inverse_dis_arr);
   }
 
   ceres::Solver::Options ops;
