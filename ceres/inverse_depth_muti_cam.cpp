@@ -9,6 +9,7 @@
 #include <ceres/gradient_checker.h>
 #include <ceres/gradient_problem_solver.h>
 #include "so3.h"
+#include "iomanip"
 
 using namespace std;
 
@@ -105,6 +106,10 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
 
   Eigen::Map<Eigen::Matrix<double, 3, 1>> residual(residuals);
   residual = pc_norm - meas_direction_;
+  std::cout << setprecision(15) << "error " << residual.transpose() << std::endl;
+  Eigen::Vector3d tt = Eigen::Vector3d( -1.2280853751671, -0.836780331419576 , 0.336094029562343) - Eigen::Vector3d( -1.22808519186721 ,-0.836787855762503 , 0.336094029562343);
+  std::cout << tt / 1e-5 << std::endl;
+  throw std::runtime_error("a");
   // std::cout << "residual " << residual.transpose() << std::endl;
   const double norm = pc.norm();
   const double norm_3 = norm * norm * norm;
@@ -119,8 +124,8 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
       Eigen::Matrix<double, 3, 7> dpc_dTwy;
       dpc_dTwy.setZero();
 
-      dpc_dTwy.block<3, 3>(0, 0) = inverse * Rcw;                                                                   // dpc_dtwa
-      dpc_dTwy.block<3, 3>(0, 3) = -Rcw * Sophus::SO3::hat(Rwa * pa) - Rcw * Sophus::SO3::hat(inverse * Rwy * tia); // dpc_dRwa
+      dpc_dTwy.block<3, 3>(0, 0) = inverse * Rcw;                                                                         // dpc_dtwa
+      dpc_dTwy.block<3, 3>(0, 3) = -Rcw * Rwy * Sophus::SO3::hat(Ria * pa) - Rcw * Rwy * Sophus::SO3::hat(inverse * tia); // dpc_dRwa
       // std::cout << "err " << Rcw * Sophus::SO3::hat(inverse * Rwy * tia) << std::endl;
       // std::cout<<Rwa << std::endl;
       dr_dTwy = dr_dpc * dpc_dTwy;
@@ -133,8 +138,8 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
       Eigen::Matrix<double, 3, 7> dpc_dTwx;
       dpc_dTwx.setZero();
 
-      dpc_dTwx.block<3, 3>(0, 0) = -inverse * Rcw;                                                       // dpc_dtwc
-      dpc_dTwx.block<3, 3>(0, 3) = Rcw * Sophus::SO3::hat(Rwa * pa + inverse * (twy + Rwy * tia - twx)); // dpc_dRwc
+      dpc_dTwx.block<3, 3>(0, 0) = -inverse * Rcw;                                                                               // dpc_dtwc
+      dpc_dTwx.block<3, 3>(0, 3) = Ric.transpose() * Sophus::SO3::hat(Rxw * Rwa * pa + inverse * Rxw * (twy + Rwy * tia - twx)); // dpc_dRwc
       dr_dTwx = dr_dpc * dpc_dTwx;
       dr_dTwx = sqrt_info_ * dr_dTwx;
     }
@@ -198,6 +203,24 @@ bool PoseLocalParameterization::Plus(const double *x, const double *delta, doubl
 
   return true;
 }
+
+bool PPlus(const double *x, const double *delta, double *x_plus_delta)
+{
+  Eigen::Map<const Eigen::Vector3d> _p(x);
+  Eigen::Map<const Eigen::Quaterniond> _q(x + 3);
+
+  Eigen::Map<const Eigen::Vector3d> dp(delta);
+
+  Eigen::Quaterniond dq = deltaQ(Eigen::Map<const Eigen::Vector3d>(delta + 3));
+
+  Eigen::Map<Eigen::Vector3d> p(x_plus_delta);
+  Eigen::Map<Eigen::Quaterniond> q(x_plus_delta + 3);
+
+  p = _p + dp;
+  q = (_q * dq).normalized();
+
+  return true;
+}
 bool PoseLocalParameterization::ComputeJacobian(const double *x, double *jacobian) const
 {
   Eigen::Map<Eigen::Matrix<double, 7, 6, Eigen::RowMajor>> j(jacobian);
@@ -230,11 +253,15 @@ int main()
   // Test3();
   return 0;
 }
-
+//-1.16815 -0.782205  0.256189  -1.16897 -0.782336  0.255315
+//-1.16912 -0.781456  0.255153 -1.16897 -0.782336  0.255315
+//-1.16901 -0.783182  0.255282 -1.16897 -0.782336  0.255315
 void Test1()
 {
   std::cout << "optimizer Twa" << std::endl;
-
+  double d = 0;
+  // double d = 1e-5;
+  double dt[6] = {0, 0, 0, 0, 0, d};
   double Twa_arr[7] = {0.7, 0.2, 0.1, 0, 0, 0.8, 0.6}; // txtytzqxqyqzqw
   Eigen::Matrix3d Rwa = Eigen::Matrix3d::Identity();
   Eigen::Vector3d twa(0, 0, 0);
@@ -294,6 +321,15 @@ void Test1()
     Rwcs.emplace_back(Rwc);
     twcs.push_back(twc);
     Eigen::Quaterniond qwc(Rwc);
+    double TT[7];
+    TT[0] = twc.x();
+    TT[1] = twc.y();
+    TT[2] = twc.z();
+    TT[3] = qwc.x();
+    TT[4] = qwc.y();
+    TT[5] = qwc.z();
+    TT[6] = qwc.w();
+
     Twc_arr[i][0] = twc.x();
     Twc_arr[i][1] = twc.y();
     Twc_arr[i][2] = twc.z();
@@ -301,7 +337,9 @@ void Test1()
     Twc_arr[i][4] = qwc.y();
     Twc_arr[i][5] = qwc.z();
     Twc_arr[i][6] = qwc.w();
+    PPlus(TT, dt, Twc_arr[i]);
   }
+
   for (int i = 0; i < number_image; ++i)
   {
     problem.AddParameterBlock(Twc_arr[i], 7, parameterization);
@@ -381,7 +419,7 @@ void Test2()
   Eigen::Matrix3d Rwc = Eigen::Matrix3d::Identity();
   Eigen::Vector3d twc(0, 0, 0);
 
-  constexpr int number_point_image = 200;
+  constexpr int number_point_image = 20000;
 
   double uv_arr[number_point_image][2];
   double inverse_dis_arr[number_point_image][1];
