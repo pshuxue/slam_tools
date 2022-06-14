@@ -19,8 +19,11 @@ target_link_libraries(opt_points ${OpenCV_LIBRARIES} ${CERES_LIBRARIES})
 
 add_executable(inverse_depth inverse_depth.cpp  src/so3.cpp)
 target_link_libraries(inverse_depth ${CERES_LIBRARIES})
-add_executable(test test.cpp  src/so3.cpp)
-target_link_libraries(test ${CERES_LIBRARIES})
+add_executable(number_diff number_diff.cpp   src/so3.cpp)
+target_link_libraries(number_diff ${CERES_LIBRARIES})
 
 add_executable(inverse_depth_muti_cam inverse_depth_muti_cam.cpp   src/so3.cpp)
 target_link_libraries(inverse_depth_muti_cam ${CERES_LIBRARIES})
+
+add_executable(muti_cam_inverse_depth_opti_uvp muti_cam_inverse_depth_opti_uvp.cpp   src/so3.cpp)
+target_link_libraries(muti_cam_inverse_depth_opti_uvp ${CERES_LIBRARIES})

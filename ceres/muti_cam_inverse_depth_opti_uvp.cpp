@@ -162,6 +162,7 @@ void Test3()
   // local_parameterizations.push_back(nullptr);
 
   // ceres::NumericDiffOptions numeric_diff_options;
+  // numeric_diff_options.relative_step_size
 
   // std::vector<double *> parameter_blocks;
   // parameter_blocks.push_back(uv_arr);

@@ -87,6 +87,9 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
   const Eigen::Matrix3d Rwc = Rwx * Ric;
   const Eigen::Matrix3d Rcw = Rwc.transpose();
   const Eigen::Vector3d twc = twx + Rwx * tic;
+  const Eigen::Matrix3d Rcy = Rcw * Rwy;
+  const Eigen::Matrix3d Rca = Rcw * Rwa;
+  const Eigen::Vector3d tca = Rcw * (twa - twc);
   // std::cout << "Rwc " << Rwc << std::endl;
 
   const double u = parameters[2][0];
@@ -98,7 +101,7 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
   const double n = 2 / (u * u + v * v + 1);
   const Eigen::Vector3d pa(n * u, n * v, n - 1);
   // std::cout << "sspa " << pa.transpose() << std::endl;
-  const Eigen::Vector3d pc = Rcw * Rwa * pa + inverse * Rcw * (twa - twc);
+  const Eigen::Vector3d pc = Rca * pa + inverse * tca;
   const Eigen::Vector3d pc_norm = pc.normalized();
   // std::cout<<Rwx<<std::endl;
   // std::cout << "twc sss  " << twa.transpose() << std::endl;
@@ -106,10 +109,8 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
 
   Eigen::Map<Eigen::Matrix<double, 3, 1>> residual(residuals);
   residual = pc_norm - meas_direction_;
-  std::cout << setprecision(15) << "error " << residual.transpose() << std::endl;
-  Eigen::Vector3d tt = Eigen::Vector3d( -1.2280853751671, -0.836780331419576 , 0.336094029562343) - Eigen::Vector3d( -1.22808519186721 ,-0.836787855762503 , 0.336094029562343);
-  std::cout << tt / 1e-5 << std::endl;
-  throw std::runtime_error("a");
+  // std::cout << setprecision(15) << "error " << residual.transpose() << std::endl;
+  // throw std::runtime_error("a");
   // std::cout << "residual " << residual.transpose() << std::endl;
   const double norm = pc.norm();
   const double norm_3 = norm * norm * norm;
@@ -124,8 +125,8 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
       Eigen::Matrix<double, 3, 7> dpc_dTwy;
       dpc_dTwy.setZero();
 
-      dpc_dTwy.block<3, 3>(0, 0) = inverse * Rcw;                                                                         // dpc_dtwa
-      dpc_dTwy.block<3, 3>(0, 3) = -Rcw * Rwy * Sophus::SO3::hat(Ria * pa) - Rcw * Rwy * Sophus::SO3::hat(inverse * tia); // dpc_dRwa
+      dpc_dTwy.block<3, 3>(0, 0) = inverse * Rcw;                                                             // dpc_dtwa
+      dpc_dTwy.block<3, 3>(0, 3) = -Rcy * Sophus::SO3::hat(Ria * pa) - Rcy * Sophus::SO3::hat(inverse * tia); // dpc_dRwa
       // std::cout << "err " << Rcw * Sophus::SO3::hat(inverse * Rwy * tia) << std::endl;
       // std::cout<<Rwa << std::endl;
       dr_dTwy = dr_dpc * dpc_dTwy;
@@ -149,7 +150,7 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
       Eigen::Map<Eigen::Matrix<double, 3, 2, Eigen::RowMajor>> dr_duv(jacobians[2]);
       Eigen::Matrix<double, 3, 2> dpc_duv;
       dpc_duv.setZero();
-      const Eigen::Matrix3d dpc_dpa = Rcw * Rwa;
+      const Eigen::Matrix3d dpc_dpa = Rca;
       Eigen::Matrix<double, 3, 2> dpa_duv;
       const double N = u * u + v * v + 1;
       const double NN = N * N;
@@ -167,7 +168,7 @@ bool RigInverseDistanceFactor::Evaluate(double const *const *parameters, double 
     {
       Eigen::Map<Eigen::Vector3d> dr_ds(jacobians[3]);
       Eigen::Vector3d dpc_ds;
-      dpc_ds = Rcw * (twa - twc);
+      dpc_ds = tca;
       dr_ds = dr_dpc * dpc_ds;
       // std::cout << dr_ds << std::endl;
       dr_ds = sqrt_info_ * dr_ds;
@@ -217,7 +218,7 @@ bool PPlus(const double *x, const double *delta, double *x_plus_delta)
   Eigen::Map<Eigen::Quaterniond> q(x_plus_delta + 3);
 
   p = _p + dp;
-  q = (_q * dq).normalized();
+  q = (dq*_q ).normalized();
 
   return true;
 }
